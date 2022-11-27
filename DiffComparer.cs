@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Text;
 using osu.Game.Beatmaps;
 using osu.Game.Beatmaps.Formats;
 using osu.Game.IO;
@@ -10,7 +11,7 @@ namespace diffcalc_comparer;
 
 public class DiffComparer
 {
-    private DiffComparerOptions options;
+    private readonly DiffComparerOptions options;
 
     public DiffComparer(DiffComparerOptions options)
     {
@@ -19,8 +20,9 @@ public class DiffComparer
 
     public void Compare()
     {
-        var beatmaps = loadBeatmaps();
-        var rows = new List<string[]>();
+        var beatmaps = loadBeatmaps().ToArray();
+
+        var rows = new List<BeatmapCalculationResult>();
         var table = new Table();
 
         table.AddColumn("Title");
@@ -32,48 +34,64 @@ public class DiffComparer
         table.AddColumn(new TableColumn("RX (A)").Centered());
         table.AddColumn(new TableColumn("RX (B)").Centered());
 
-        foreach (var beatmap in beatmaps)
-        {
-            var srA = getStarRatings(beatmap, Env.RulesetA);
-            var srB = getStarRatings(beatmap, Env.RulesetB);
-
-            var diff = srB.sr - srA.sr < 0 ? (srB.sr - srA.sr).ToString("N") : "+" + (srB.sr - srA.sr).ToString("N");
-            var title = options.IncludeUrl.HasValue && options.IncludeUrl.Value
-                            ? $"[{beatmap}](https://osu.ppy.sh/b/{beatmap.BeatmapInfo.OnlineID})"
-                            : beatmap.ToString();
-
-            rows.Add(new[]
+        AnsiConsole.Progress()
+           .Start(ctx =>
             {
-                title,
-                srA.sr.ToString("N"), srB.sr.ToString("N"),
-                diff,
-                srA.ap.HasValue ? srA.ap.Value.ToString("N") : "-", srB.ap.HasValue ? srB.ap.Value.ToString("N") : "-",
-                srA.rx.HasValue ? srA.rx.Value.ToString("N") : "-", srB.rx.HasValue ? srB.rx.Value.ToString("N") : "-"
+                var sraTask = ctx.AddTask($"Calculate star ratings (Variant A)", true, beatmaps.Length);
+                var srbTask = ctx.AddTask($"Calculate star ratings (Variant B)", true, beatmaps.Length);
+                
+                foreach (var beatmap in beatmaps)
+                {
+                    var srA = getStarRatings(beatmap, Env.RulesetA);
+                    sraTask.Increment(1);
+                    var srB = getStarRatings(beatmap, Env.RulesetB);
+                    srbTask.Increment(1);
+
+                    rows.Add(new BeatmapCalculationResult
+                    {
+                        Beatmap = beatmap,
+                        SRA = srA.sr,
+                        SRB = srB.sr,
+                        Diff = srB.sr - srA.sr,
+                        APA = srA.ap,
+                        APB = srB.ap,
+                        RXA = srA.rx,
+                        RXB = srB.rx
+                    });
+                }
             });
 
-            table.AddRow(beatmap.ToString().EscapeMarkup(),
-                srA.sr.ToString("N"), srB.sr.ToString("N"),
-                diff,
-                srA.ap.HasValue ? srA.ap.Value.ToString("N") : "-", srB.ap.HasValue ? srB.ap.Value.ToString("N") : "-",
-                srA.rx.HasValue ? srA.rx.Value.ToString("N") : "-", srB.rx.HasValue ? srB.rx.Value.ToString("N") : "-");
+        var orderedRows = rows.OrderByDescending(r => r.Diff).ToArray();
+
+        foreach (var row in orderedRows)
+        {
+            table.AddRow(row.Beatmap.ToString().EscapeMarkup(),
+                row.SRA.ToString("N"), row.SRB.ToString("N"),
+                row.Diff < 0 ? row.Diff.ToString("N") : "+" + row.Diff.ToString("N"),
+                row.APA.HasValue ? row.APA.Value.ToString("N") : "-", row.APB.HasValue ? row.APB.Value.ToString("N") : "-",
+                row.RXA.HasValue ? row.RXA.Value.ToString("N") : "-", row.RXB.HasValue ? row.RXB.Value.ToString("N") : "-");
         }
 
         AnsiConsole.Write(table);
 
-        if (!string.IsNullOrEmpty(options.ExportPath))
+        if (string.IsNullOrEmpty(options.ExportPath))
+            return;
+
+        var sb = new StringBuilder();
+
+        sb.AppendLine("| Title | SR (A) | SR (B) | DIFF | AP (A) | AP (B) | RX (A) | RX (B) |");
+        sb.AppendLine("|-------|:------:|:------:|:----:|:------:|:------:|:------:|:------:|");
+
+        foreach (var row in orderedRows)
         {
-            var sb = new StringBuilder();
-
-            sb.AppendLine("| Title | SR (A) | SR (B) | DIFF | AP (A) | AP (B) | RX (A) | RX (B) |");
-            sb.AppendLine("|-------|:------:|:------:|:----:|:------:|:------:|:------:|:------:|");
-
-            foreach (var row in rows)
-            {
-                sb.AppendLine($"| {row[0]} | {row[1]} | {row[2]} | {row[3]} | {row[4]} | {row[5]} | {row[6]} | {row[7]} |");
-            }
-
-            File.WriteAllText(options.ExportPath, sb.ToString());
+            var title = options.IncludeUrl.HasValue && options.IncludeUrl.Value
+                            ? $"[{row.Beatmap}](https://osu.ppy.sh/b/{row.Beatmap.BeatmapInfo.OnlineID})"
+                            : row.Beatmap.ToString();
+                
+            sb.AppendLine($"| {title} | {row.SRA} | {row.SRB} | {row.Diff} | {row.APA} | {row.APB} | {row.RXA} | {row.RXB} |");
         }
+
+        File.WriteAllText(options.ExportPath, sb.ToString());
     }
 
     private static (double sr, double? ap, double? rx) getStarRatings(Beatmap beatmap, Ruleset ruleset)
@@ -113,16 +131,37 @@ public class DiffComparer
         var mapsPath = Path.Combine(Directory.GetParent(Environment.CurrentDirectory)!.Parent!.Parent!.FullName, "maps");
         var beatmaps = new List<Beatmap>();
 
-        foreach (var file in Directory.GetFiles(mapsPath))
-        {
-            if (file == ".gitignore" || !file.EndsWith(".osu"))
-                continue;
+        AnsiConsole.Progress()
+           .Start(ctx =>
+            {
+                var length = Directory.GetFiles(mapsPath).Length;
+                var task = ctx.AddTask($"Parse osu beatmaps", true, length);
 
-            var legacyDecoder = new LegacyBeatmapDecoder();
-            beatmaps.Add(legacyDecoder.Decode(new LineBufferedReader(File.Open(Path.Combine(mapsPath, file), FileMode.Open))));
-        }
+                foreach (var file in Directory.GetFiles(mapsPath))
+                {
+                    if (file == ".gitignore" || !file.EndsWith(".osu"))
+                        continue;
+
+                    var legacyDecoder = new LegacyBeatmapDecoder();
+                    beatmaps.Add(legacyDecoder.Decode(new LineBufferedReader(File.Open(Path.Combine(mapsPath, file), FileMode.Open))));
+                    task.Increment(1);
+                }
+            });
 
         return beatmaps;
+    }
+    
+    [SuppressMessage("ReSharper", "InconsistentNaming")]
+    private class BeatmapCalculationResult
+    {
+        public Beatmap Beatmap { get; init; } = null!;
+        public double SRA { get; init; }
+        public double SRB { get; init; }
+        public double Diff { get; init; }
+        public double? APA { get; init; }
+        public double? APB { get; init; }
+        public double? RXA { get; init; }
+        public double? RXB { get; init; }
     }
 }
 
