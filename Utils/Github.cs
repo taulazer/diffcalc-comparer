@@ -21,10 +21,8 @@ public static class Github
 
         var cloneResult = await Cli.Wrap("git")
                              .WithArguments(new[] { "clone", "--filter=tree:0", repo, targetDir })
-                             .WithStandardOutputPipe(PipeTarget.ToDelegate(log))
-                             .WithStandardErrorPipe(PipeTarget.ToDelegate(log))
                              .WithValidation(CommandResultValidation.None)
-                             .ExecuteAsync();
+                             .ExecuteWithLogging();
 
         if (cloneResult.ExitCode == 0)
             AnsiConsole.MarkupLineInterpolated($"[dim grey]LOG:[/] Successfully cloned {url}");
@@ -34,10 +32,8 @@ public static class Github
             case "pull":
                 var prCheckoutResult = await Cli.Wrap("gh")
                                           .WithArguments(new[] { "pr", "checkout", targetInfo })
-                                          .WithStandardOutputPipe(PipeTarget.ToDelegate(log))
-                                          .WithStandardErrorPipe(PipeTarget.ToDelegate(log))
                                           .WithWorkingDirectory(targetDir)
-                                          .ExecuteAsync();
+                                          .ExecuteWithLogging();
 
                 if (prCheckoutResult.ExitCode == 0)
                     AnsiConsole.MarkupLineInterpolated($"[dim grey]LOG:[/] Successfully checked out pr {targetInfo}");
@@ -46,10 +42,8 @@ public static class Github
                 {
                     var prCheckoutResult2 = await Cli.Wrap("git")
                                                .WithArguments(new[] { "checkout", prCommit })
-                                               .WithStandardOutputPipe(PipeTarget.ToDelegate(log))
-                                               .WithStandardErrorPipe(PipeTarget.ToDelegate(log))
                                                .WithWorkingDirectory(targetDir)
-                                               .ExecuteAsync();
+                                               .ExecuteWithLogging();
 
                     if (prCheckoutResult2.ExitCode == 0)
                         AnsiConsole.MarkupLineInterpolated($"[dim grey]LOG:[/] Successfully checked out {prCommit}");
@@ -61,10 +55,8 @@ public static class Github
             case "tree":
                 var checkoutResult = await Cli.Wrap("git")
                                         .WithArguments(new[] { "checkout", targetInfo })
-                                        .WithStandardOutputPipe(PipeTarget.ToDelegate(log))
-                                        .WithStandardErrorPipe(PipeTarget.ToDelegate(log))
                                         .WithWorkingDirectory(targetDir)
-                                        .ExecuteAsync();
+                                        .ExecuteWithLogging();
 
                 if (checkoutResult.ExitCode == 0)
                     AnsiConsole.MarkupLineInterpolated($"[dim grey]LOG:[/] Successfully checked out {targetInfo}");
@@ -76,10 +68,5 @@ public static class Github
             default:
                 throw new Exception($"Not a valid repository url: {url}");
         }
-    }
-
-    private static void log(string s)
-    {
-        AnsiConsole.MarkupLineInterpolated($"[dim grey]LOG:[/] {s}");
     }
 }
