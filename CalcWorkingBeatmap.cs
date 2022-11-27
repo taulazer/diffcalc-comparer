@@ -22,7 +22,7 @@ public class CalcWorkingBeatmap : TestWorkingBeatmap
     // but without ruleset instantiation.
     public override IBeatmap GetPlayableBeatmap(IRulesetInfo ruleset, IReadOnlyList<Mod> mods, CancellationToken token)
     {
-        IBeatmapConverter converter = CreateBeatmapConverter(Beatmap, rulesetInstance);
+        var converter = CreateBeatmapConverter(Beatmap, rulesetInstance);
 
         // Check if the beatmap can be converted
         if (Beatmap.HitObjects.Count > 0 && !converter.CanConvert())
@@ -37,7 +37,7 @@ public class CalcWorkingBeatmap : TestWorkingBeatmap
         }
 
         // Convert
-        IBeatmap converted = converter.Convert(token);
+        var converted = converter.Convert(token);
 
         // Apply conversion mods to the result
         foreach (var mod in mods.OfType<IApplicableAfterBeatmapConversion>())
@@ -48,13 +48,11 @@ public class CalcWorkingBeatmap : TestWorkingBeatmap
 
         // Apply difficulty mods
         if (mods.Any(m => m is IApplicableToDifficulty))
-        {
             foreach (var mod in mods.OfType<IApplicableToDifficulty>())
             {
                 token.ThrowIfCancellationRequested();
                 mod.ApplyToDifficulty(converted.Difficulty);
             }
-        }
 
         var processor = rulesetInstance.CreateBeatmapProcessor(converted);
 
@@ -74,12 +72,10 @@ public class CalcWorkingBeatmap : TestWorkingBeatmap
         }
 
         foreach (var mod in mods.OfType<IApplicableToHitObject>())
+        foreach (var obj in converted.HitObjects)
         {
-            foreach (var obj in converted.HitObjects)
-            {
-                token.ThrowIfCancellationRequested();
-                mod.ApplyToHitObject(obj);
-            }
+            token.ThrowIfCancellationRequested();
+            mod.ApplyToHitObject(obj);
         }
 
         processor?.PostProcess();

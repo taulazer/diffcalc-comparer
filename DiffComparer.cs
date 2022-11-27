@@ -37,9 +37,9 @@ public class DiffComparer
         AnsiConsole.Progress()
            .Start(ctx =>
             {
-                var sraTask = ctx.AddTask($"Calculate star ratings (Variant A)", true, beatmaps.Length);
-                var srbTask = ctx.AddTask($"Calculate star ratings (Variant B)", true, beatmaps.Length);
-                
+                var sraTask = ctx.AddTask("Calculate star ratings (Variant A)", true, beatmaps.Length);
+                var srbTask = ctx.AddTask("Calculate star ratings (Variant B)", true, beatmaps.Length);
+
                 foreach (var beatmap in beatmaps)
                 {
                     var srA = getStarRatings(beatmap, Env.RulesetA);
@@ -64,13 +64,11 @@ public class DiffComparer
         var orderedRows = rows.OrderByDescending(r => r.Diff).ToArray();
 
         foreach (var row in orderedRows)
-        {
             table.AddRow(row.Beatmap.ToString().EscapeMarkup(),
                 row.SRA.ToString("N"), row.SRB.ToString("N"),
                 row.Diff < 0 ? row.Diff.ToString("N") : "+" + row.Diff.ToString("N"),
                 row.APA.HasValue ? row.APA.Value.ToString("N") : "-", row.APB.HasValue ? row.APB.Value.ToString("N") : "-",
                 row.RXA.HasValue ? row.RXA.Value.ToString("N") : "-", row.RXB.HasValue ? row.RXB.Value.ToString("N") : "-");
-        }
 
         AnsiConsole.Write(table);
 
@@ -87,8 +85,16 @@ public class DiffComparer
             var title = options.IncludeUrl.HasValue && options.IncludeUrl.Value
                             ? $"[{row.Beatmap}](https://osu.ppy.sh/b/{row.Beatmap.BeatmapInfo.OnlineID})"
                             : row.Beatmap.ToString();
-                
-            sb.AppendLine($"| {title} | {row.SRA} | {row.SRB} | {row.Diff} | {row.APA} | {row.APB} | {row.RXA} | {row.RXB} |");
+
+            sb.AppendLine(
+                $"| {title} " +
+                $"| {row.SRA.ToString("N")} " +
+                $"| {row.SRB.ToString("N")} " +
+                $"| {(row.Diff < 0 ? row.Diff.ToString("N") : "+" + row.Diff.ToString("N"))} " +
+                $"| {(row.APA.HasValue ? row.APA.Value.ToString("N") : "-")} " +
+                $"| {(row.APB.HasValue ? row.APB.Value.ToString("N") : "-")} " +
+                $"| {(row.RXA.HasValue ? row.RXA.Value.ToString("N") : "-")} " +
+                $"| {(row.RXB.HasValue ? row.RXB.Value.ToString("N") : "-")} |");
         }
 
         File.WriteAllText(options.ExportPath, sb.ToString());
@@ -105,7 +111,7 @@ public class DiffComparer
 
         try
         {
-            var autoplayMod = ruleset.AllMods.First(m => m.GetType().IsSubclassOf(typeof(ModAutoplay))) as Mod;
+            var autoplayMod = ruleset.AllMods.First(m => m.Name == "Autopilot") as Mod;
             ap = calculator.Calculate(new[] { autoplayMod }).StarRating;
         }
         catch
@@ -135,7 +141,7 @@ public class DiffComparer
            .Start(ctx =>
             {
                 var length = Directory.GetFiles(mapsPath).Length;
-                var task = ctx.AddTask($"Parse osu beatmaps", true, length);
+                var task = ctx.AddTask("Parse osu beatmaps", true, length);
 
                 foreach (var file in Directory.GetFiles(mapsPath))
                 {
@@ -150,7 +156,7 @@ public class DiffComparer
 
         return beatmaps;
     }
-    
+
     [SuppressMessage("ReSharper", "InconsistentNaming")]
     private class BeatmapCalculationResult
     {
