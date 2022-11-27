@@ -1,35 +1,133 @@
-﻿using diffcalc_comparer.Utils;
+﻿using System.Reflection;
+using System.Text.RegularExpressions;
+using CliWrap;
+using diffcalc_comparer.Utils;
+using osu.Game.Rulesets;
 using Spectre.Console;
 
 namespace diffcalc_comparer;
 
 public static class Program
 {
+    private static string rulesetAUrl = null!;
+    private static string rulesetBUrl = null!;
+    private static string rulesetAPath = null!;
+    private static string rulesetBPath = null!;
+
     public static void Main(string[] args)
     {
         loadEnv();
-        cloneRepos();
+
+        rulesetAUrl = Environment.GetEnvironmentVariable("RULESET_A") ?? throw new Exception("Environment variable \"RULESET_A\" must be defined.");
+        rulesetBUrl = Environment.GetEnvironmentVariable("RULESET_B") ?? throw new Exception("Environment variable \"RULESET_B\" must be defined.");
+        rulesetAPath = Path.Combine(Directory.GetCurrentDirectory(), "ruleset_a");
+        rulesetBPath = Path.Combine(Directory.GetCurrentDirectory(), "ruleset_b");
+
+        cloneRepos().Wait();
+        buildAndLoadRulesets().Wait();
+
+        var includeUrls = AnsiConsole.Confirm("embed url in beatmap name?");
+        var exportPath = AnsiConsole.Prompt(new TextPrompt<string?>("[[optional]] Export path?").AllowEmpty());
+
+        new DiffComparer(new DiffComparerOptions
+        {
+            ExportPath = exportPath,
+            IncludeUrl = includeUrls
+        }).Compare();
     }
 
-    private static void cloneRepos()
+    private static Task buildAndLoadRulesets()
     {
-        if (Environment.GetEnvironmentVariable("RULESET_A") == null)
-            throw new Exception("Environment variable \"RULESET_A\" must be defined.");
-        if (Environment.GetEnvironmentVariable("RULESET_B") == null)
-            throw new Exception("Environment variable \"RULESET_B\" must be defined.");
+        return AnsiConsole.Status()
+           .StartAsync("Building rulesets", async ctx =>
+            {
+                var rulesetName = getRulesetName();
+                ctx.Status = $"Building {rulesetName} rulesets (variant A)";
+                ctx.Spinner(Spinner.Known.Circle);
+                Env.RulesetA = await buildAndLoadRuleset(rulesetAPath, "A");
 
-        var rulesetAUrl = Environment.GetEnvironmentVariable("RULESET_A");
-        var rulesetBUrl = Environment.GetEnvironmentVariable("RULESET_B");
-        var rulesetAPath = Path.Combine(Directory.GetCurrentDirectory(), "ruleset_a");
-        var rulesetBPath = Path.Combine(Directory.GetCurrentDirectory(), "ruleset_b");
+                ctx.Status = $"Building {rulesetName} rulesets (variant B)";
+                Env.RulesetB = await buildAndLoadRuleset(rulesetBPath, "B");
 
-        AnsiConsole.Status()
+                async Task<Ruleset> buildAndLoadRuleset(string rulesetPath, string variant)
+                {
+                    await Cli.Wrap("dotnet")
+                       .WithArguments(new[] { "build", rulesetName, "-c", "Release" }!)
+                       .WithWorkingDirectory(rulesetPath)
+                       .ExecuteWithLogging();
+
+                    var buildPath = rulesetPath;
+                    if (Directory.Exists(Path.Combine(buildPath, rulesetName)))
+                        buildPath = Path.Combine(buildPath, rulesetName);
+                    buildPath = Path.Combine(buildPath, "bin", "Release");
+                    var netVersion = Directory.GetDirectories(buildPath)[0];
+                    buildPath = Path.Combine(buildPath, netVersion);
+                    var dllName = rulesetName + ".dll";
+
+                    var rulesetAssembly = Assembly.LoadFile(Path.Combine(buildPath, dllName));
+                    Ruleset rulesetClass;
+
+                    try
+                    {
+                        var rulesetType = rulesetAssembly.GetTypes().First(t => t.IsPublic && t.IsSubclassOf(typeof(Ruleset)));
+                        rulesetClass = Activator.CreateInstance(rulesetType) as Ruleset ?? throw new InvalidOperationException();
+                    }
+                    catch (Exception e)
+                    {
+                        throw new Exception($"Could not load ruleset {rulesetName} (variant {variant}).", e);
+                    }
+
+                    if (rulesetClass.RulesetAPIVersionSupported != Ruleset.CURRENT_RULESET_API_VERSION)
+                        throw new Exception(
+                            $"Ruleset version is out of date. ({rulesetName} (variant {variant}): {rulesetClass.RulesetAPIVersionSupported} | current: {Ruleset.CURRENT_RULESET_API_VERSION})");
+
+                    return rulesetClass;
+                }
+            });
+    }
+
+    private static string getRulesetName()
+    {
+        string rulesetName = null!;
+        var rulesetPathRegex = new Regex(@"osu\.Game\.Rulesets\.\w{1,}");
+
+        foreach (var directory in Directory.GetDirectories(rulesetAPath))
+        {
+            var match = rulesetPathRegex.Match(directory);
+            if (!match.Success)
+                continue;
+
+            rulesetName = match.Value;
+            break;
+        }
+
+        if (!string.IsNullOrEmpty(rulesetName))
+            return rulesetName;
+
+        var rulesetFileRegex = new Regex(@"osu\.Game\.Rulesets\.\w{1,}(\.csproj|\.sln)");
+
+        foreach (var file in Directory.GetFiles(rulesetAPath))
+        {
+            var match = rulesetFileRegex.Match(file);
+            if (!match.Success)
+                continue;
+
+            rulesetName = match.Groups[1].Value;
+            break;
+        }
+
+        return rulesetName;
+    }
+
+    private static Task cloneRepos()
+    {
+        return AnsiConsole.Status()
            .StartAsync($"Cloning \"{rulesetAUrl}\" -> {rulesetAPath}", async ctx =>
             {
                 await Github.CloneRepo(rulesetAUrl!, rulesetAPath);
                 ctx.Status = $"Cloning \"{rulesetBUrl}\" -> {rulesetBPath}";
                 await Github.CloneRepo(rulesetBUrl!, rulesetBPath);
-            }).Wait();
+            });
     }
 
     private static void loadEnv()
