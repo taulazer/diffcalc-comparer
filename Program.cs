@@ -26,7 +26,7 @@ public static class Program
         cloneRepos().Wait();
         buildAndLoadRulesets().Wait();
 
-        var includeUrls = AnsiConsole.Confirm("embed url in beatmap name?");
+        var includeUrls = AnsiConsole.Confirm("embed url in beatmap name?", false);
         var exportPath = AnsiConsole.Prompt(new TextPrompt<string?>("[[optional]] Export path?").AllowEmpty());
 
         new DiffComparer(new DiffComparerOptions
